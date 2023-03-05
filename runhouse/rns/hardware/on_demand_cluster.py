@@ -130,8 +130,10 @@ class OnDemandCluster(Cluster):
         if self.sky_data.get("handle", {}).get("cluster_name") == _current_cluster():
             return
 
-        yaml_path = self._yaml_path or self.sky_data.get("handle", {}).get(
-            "cluster_yaml"
+        yaml_path = (
+            self.relative_yaml_path(self._yaml_path)
+            if self._yaml_path
+            else self.sky_data.get("handle", {}).get("cluster_yaml")
         )
 
         if (
@@ -159,6 +161,11 @@ class OnDemandCluster(Cluster):
             handle_info["launched_resources"]["cloud"]
         )
         backend_utils._add_auth_to_cluster_config(cloud_provider, cluster_abs_path)
+
+        import ray
+
+        if ray.is_initialized():
+            ray.shutdown()
 
         resources = sky.Resources.from_yaml_config(handle_info["launched_resources"])
         handle = CloudVmRayBackend.ResourceHandle(
@@ -352,11 +359,7 @@ class OnDemandCluster(Cluster):
             raise Exception(f"File with ssh key not found in: {path_to_file}")
 
     def ssh_creds(self):
-        if (
-            not self._yaml_path
-            or not self._yaml_path
-            or not Path(self._yaml_path).exists()
-        ):
+        if not self._yaml_path or not Path(self._yaml_path).exists():
             if self.sky_data:
                 # If this cluster was serialized and sent over the wire, it will have sky_data (we make sure of that
                 # in __getstate__) but no yaml, and we need to save down the sky data to the sky db and local yaml
