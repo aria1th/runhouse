@@ -8,9 +8,7 @@ import re
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple, Union
 
-import grpc
 import requests
-import sshtunnel
 
 from runhouse import rh_config
 from runhouse.rns.api_utils.resource_access import ResourceAccess
@@ -105,45 +103,15 @@ class Function(Resource):
         new_function.reqs = reqs if reqs else self.reqs
         new_function.setup_cmds = (
             setup_cmds if setup_cmds else self.setup_cmds
-        )  # Run inside reup_cluster
-        # TODO [DG] figure out how to run setup_cmds on BYO Cluster
+        )
 
         logging.info("Setting up Function on cluster.")
-        if not new_function.system.address:
-            # For OnDemandCluster, this initial check doesn't trigger a sky.status, which is slow.
-            # If cluster simply doesn't have an address we likely need to up it.
-            if not hasattr(new_function.system, "up"):
-                raise ValueError(
-                    "Cluster must have an address (i.e. be up) or have a reup_cluster method "
-                    "(e.g. OnDemandCluster)."
-                )
-            if not new_function.system.is_up():
-                # If this is a OnDemandCluster, before we up the cluster, run a sky.check to see if the cluster
-                # is already up but doesn't have an address assigned yet.
-                new_function.reup_cluster()
-        try:
-            new_function.system.install_packages(new_function.reqs)
-        except (
-            grpc.RpcError,
-            sshtunnel.BaseSSHTunnelForwarderError,
-            asyncio.exceptions.TimeoutError,
-        ):
-            # It's possible that the cluster went down while we were trying to install packages.
-            if not new_function.system.is_up():
-                new_function.reup_cluster()
-            else:
-                new_function.system.restart_grpc_server(resync_rh=False)
-            new_function.system.install_packages(new_function.reqs)
+        new_function.system.install_packages(new_function.reqs)
+        if self.setup_cmds:
+            new_function.system.run(self.setup_cmds)
         logging.info("Function setup complete.")
 
         return new_function
-
-    def reup_cluster(self):
-        """Re-up the cluster the Function is on."""
-        logger.info(f"Upping the cluster {self.system.name}")
-        self.system.up()
-        # TODO [DG] this only happens when the cluster comes up, not when a new function is added to the cluster
-        self.system.run(self.setup_cmds)
 
     def run_setup(self, cmds: List[str], force: bool = False):
         """Run the given setup commands on the system."""
@@ -461,7 +429,7 @@ class Function(Resource):
 
         config.update(
             {
-                "system": self._resource_string_for_subconfig(self.system.save()),
+                "system": self._resource_string_for_subconfig(self.system),
                 "reqs": [
                     self._resource_string_for_subconfig(package)
                     for package in self.reqs

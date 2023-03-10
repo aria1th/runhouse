@@ -202,7 +202,7 @@ class Folder(Resource):
                 return self._data_config
 
             if not self.system.address:
-                self.system.populate_vars_from_status(dryrun=False)
+                self.system.update_from_sky_status(dryrun=False)
                 if not self.system.address:
                     raise ValueError(
                         "Cluster must be started before copying data from it."
@@ -352,7 +352,7 @@ class Folder(Resource):
         """Copies folder to local."""
         from runhouse.rns.hardware import Cluster
 
-        if self.system == "file":
+        if self._fs_str == "file":  # Also covers the case where we're on the cluster at system
             # Simply move the files within local system
             shutil.copytree(src=self.path, dst=dest_path)
         elif isinstance(self.system, Cluster):
@@ -397,7 +397,7 @@ class Folder(Resource):
         folder_config["data_config"] = data_config
         new_folder = Folder.from_config(folder_config)
 
-        if self.system == "file":
+        if self._fs_str == "file":  # Also covers the case where we're on the cluster at system
             new_folder.upload(src=local_folder_path)
         elif isinstance(self.system, Cluster):
             self.system.run(
@@ -460,9 +460,8 @@ class Folder(Resource):
         dest_folder = copy.deepcopy(self)
         dest_folder.path = dest_path
         dest_folder.system = dest_cluster
-        dest_folder.mkdir()
 
-        if self.system == "file":
+        if self._fs_str == "file":  # Includes case where we're on the cluster
             dest_cluster.rsync(source=self.path, dest=dest_path, up=True, contents=True)
 
         elif isinstance(self.system, Resource):
@@ -471,6 +470,7 @@ class Folder(Resource):
             cluster_creds = self.system.ssh_creds()
             creds_file = cluster_creds["ssh_private_key"]
 
+            dest_cluster.run([f"mkdir -p {dest_path}"])
             command = (
                 f"rsync -Pavz --filter='dir-merge,- .gitignore' -e \"ssh -i '{creds_file}' "
                 f"-o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o ExitOnForwardFailure=yes "
